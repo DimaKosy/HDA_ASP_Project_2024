@@ -8,8 +8,36 @@
 
 use std::time::Duration;
 
+//Boiler plate
+// use async_std::{
+//     prelude::*,
+//     task, 
+//     net::{TcpListener, ToSocketAddrs}, 
+// };
+
+// type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>; // 4
+
+// //Accept loop for incoming connections
+// async fn accept_loop(addr: impl ToSocketAddrs) -> Result<()> {
+
+//     let listener = TcpListener::bind(addr).await?;
+//     let mut incoming = listener.incoming();
+//     while let Some(stream) = incoming.next().await {
+//         // TODO
+//     }
+//     Ok(())
+// }
+
+
+struct Users{
+    Name:str,
+    
+}
+
+
 fn main() {
     loop {
+        
         println!(
             "This is a chat server written in Rust. Currently it only loops but does nothing..."
         );
