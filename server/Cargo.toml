@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 chat_common = { path = "../common" }
+futures = "0.3.0"
+async-std = "1"
