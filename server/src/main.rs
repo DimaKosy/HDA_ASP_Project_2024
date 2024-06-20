@@ -18,7 +18,7 @@ use std::collections::hash_map::{Entry, HashMap};
 
 // Boiler plate
 use async_std::{
-    io::BufReader,
+    io::BufReader,  
     prelude::*,
     task, 
     net::{TcpListener, ToSocketAddrs}, 
@@ -40,6 +40,10 @@ enum Event { // 1
         to: Vec<String>,
         msg: String,
     },
+    SysMessage {
+        stream: Arc<TcpStream>,
+        msg: String
+    }
 }
 
 enum Void {} //Enforcer to ensure messages are sent down an uninhabited  channel
@@ -58,12 +62,17 @@ async fn accept_loop(addr: impl ToSocketAddrs) -> Result<()> {
     let mut incoming = listener.incoming();
     while let Some(stream) = incoming.next().await {
         let stream = stream?;
-        println!("Accepting from: {}", stream.peer_addr()?);
+
+        //Connected
+        println!("Accepting from  : {}", stream.peer_addr()?);
         spawn_and_log_error(connection_loop(broker_sender.clone(), stream));
     }
     drop(broker_sender);    //closes broker so that channel is empty
-    _broker_handle.await;  //Joins broker, ensuring complition
-    Ok(())
+    match _broker_handle.await{  //Joins broker, ensuring complition ##ASK
+        Ok(()) => Ok(()),
+        Err(e) => { eprintln!("{}",e);
+                    panic!()},
+    }
 }
 
 //Helper function for error handling
@@ -80,21 +89,44 @@ where
 }
 
 async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result<()> {
+
     let stream = Arc::new(stream);
     let reader = BufReader::new(&*stream);
+    
+
+    broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Please enter a username:\n\r".to_string()) })
+    .await?;
+    println!("Sent Welcome?");
+
     let mut lines = reader.lines();
+    let mut name;
+    loop{
+        name = (match lines.next().await { 
+            None => Err("peer disconnected immediately")?,
+            Some(line) => line?,
+        }).trim().to_ascii_lowercase().to_string();
 
-    let name = match lines.next().await { 
-        None => Err("peer disconnected immediately")?,
-        Some(line) => line?,
-    };
-
+        if (name.chars().all(char::is_alphanumeric)) {
+            break;
+        }
+        broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Username must only contain alpha-numeric characters\n\r".to_string()) })
+        .await?;
+    }
+    
     
     let (_shutdown_sender, shutdown_receiver) = mpsc::unbounded::<Void>(); //only purpose is to get dropped
     //handle new connection
-    broker.send(Event::NewPeer { name: name.clone(), stream: Arc::clone(&stream),shutdown: shutdown_receiver}).await
-    .unwrap();
-
+    broker.send(
+        Event::NewPeer {
+            name: name.clone(), stream: Arc::clone(&stream),shutdown: shutdown_receiver
+        })
+    .await?;
+    
+    broker.send(
+        Event::SysMessage { 
+            stream: (Arc::clone(&stream)), msg: (format!("Welcome {}\n\r",name))
+        })
+    .await?;
 
     while let Some(line) = lines.next().await {
         
@@ -111,7 +143,7 @@ async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result
             from: name.clone(),
             to: dest,
             msg,
-        }).await.unwrap();
+        }).await?;
     }
     Ok(())
 }
@@ -137,7 +169,7 @@ async fn connection_writer_loop(messages: &mut Receiver<String>, stream: Arc<Tcp
 
 }
 
-async fn broker_loop(events: Receiver<Event>){
+async fn broker_loop(events: Receiver<Event>) -> Result<()>{
     let (disconnect_sender, mut disconnect_receiver) = mpsc::unbounded::<(String, Receiver<String>)>();
     let mut peers: HashMap<String, Sender<String>> = HashMap::new();
     let mut events = events.fuse();
@@ -152,7 +184,13 @@ async fn broker_loop(events: Receiver<Event>){
                 Some(event) => event,
             },
             disconnect = disconnect_receiver.next().fuse() => {
-                let (name, _pending_messages) = disconnect.unwrap();
+               
+                // match disconnect{
+                //     Some(disconnect) => (disconnect),
+                //     None => continue,
+                // };
+                // let (name, _pending_messages) = disconnect;
+                let (name, _pending_messages) = disconnect.unwrap(); //##ASK Option -> Result
                 assert!(peers.remove(&name).is_some());
                 continue;
             },
@@ -164,10 +202,22 @@ async fn broker_loop(events: Receiver<Event>){
                 for addr in to {
                     if let Some(peer) = peers.get_mut(&addr) {
                         let msg = format!("from {}: {}\n\r", from, msg);
-                        peer.send(msg).await
-                            .unwrap()
+                        match peer.send(msg).await{
+                            Ok(_) => (),
+                            Err(why) => print!("{}", why),
+                        }
                     }
                 }
+            }
+            Event::SysMessage {stream, msg } => {
+                let mut stream = &*stream;
+                let msg = format!("{}\n\r", msg);
+                // match stream.write_all(msg.as_bytes()).await{ //##ASK "?"" not applic?
+                //     Ok(_) => (),
+                //     Err(why) => println!("{}",why),
+                // }
+
+                stream.write_all(msg.as_bytes()).await?;
             }
             //adding new peer
             Event::NewPeer { name, stream, shutdown } => {
@@ -181,8 +231,8 @@ async fn broker_loop(events: Receiver<Event>){
 
                         spawn_and_log_error(async move {
                             let res = connection_writer_loop(&mut client_receiver, stream, shutdown).await;
-                            disconnect_sender.send((name, client_receiver)).await // sending peer name so we can safely unwrap
-                                .unwrap();
+                            disconnect_sender.send((name, client_receiver))
+                            .await?;// sending peer name
                             res
                         });
 
@@ -195,6 +245,7 @@ async fn broker_loop(events: Receiver<Event>){
     drop(disconnect_sender); //drop disconnections channel
     while let Some((_name, _pending_messages)) = disconnect_receiver.next().await {
     }
+    Ok(())
     
 
 }
