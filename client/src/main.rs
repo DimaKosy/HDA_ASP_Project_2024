@@ -56,7 +56,7 @@ async fn try_run(addr: impl ToSocketAddrs) -> Result<()> {
                     };
                     if msg_type.starts_with("file:") {
                         let filename = msg_type.trim_start_matches("file:").trim();
-                        send_file(dest, filename, &mut writer.clone()).await?;
+                        send_file(dest, &filename, &mut writer.clone()).await?;
                     } else if msg_type.starts_with("text:") {
                         writer.write_all(line.as_bytes()).await?;
                         writer.write_all(b"\n").await?;
