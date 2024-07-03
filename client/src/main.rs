@@ -16,6 +16,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>
 
 #[derive(Serialize, Deserialize, Debug)]
 struct FileTransfer {
+    destination: String,
     filename: String,
     data: Vec<u8>,
 }
@@ -49,10 +50,14 @@ async fn try_run(addr: impl ToSocketAddrs) -> Result<()> {
             line = lines_from_stdin.next().fuse() => match line {
                 Some(line) => {
                     let line = line?;
-                    if line.starts_with("file:") {
-                        let filename = line.trim_start_matches("file:").trim();
-                        send_file(&filename, &mut writer.clone()).await?;
-                    } else {
+                    let (dest, msg_type) = match line.find(":"){
+                        None => continue,
+                        Some(idx) => (&line[..idx], line[idx + 1 ..].trim()),
+                    };
+                    if msg_type.starts_with("file:") {
+                        let filename = msg_type.trim_start_matches("file:").trim();
+                        send_file(dest, &filename, &mut writer.clone()).await?;
+                    } else if msg_type.starts_with("text:") {
                         writer.write_all(line.as_bytes()).await?;
                         writer.write_all(b"\n").await?;
                     }
@@ -65,12 +70,13 @@ async fn try_run(addr: impl ToSocketAddrs) -> Result<()> {
 }
 
 
-async fn send_file(filename: &str, writer: &mut TcpStream) -> Result<()> {
+async fn send_file(destination: &str, filename: &str, writer: &mut TcpStream) -> Result<()> {
     let mut file = File::open(filename).await?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).await?;
 
     let file_transfer = FileTransfer {
+        destination: destination.to_string(),
         filename: filename.to_string(),
         data: buffer,
     };
@@ -78,7 +84,7 @@ async fn send_file(filename: &str, writer: &mut TcpStream) -> Result<()> {
     let serialized = serde_json::to_string(&file_transfer)?;
     writer.write_all(serialized.as_bytes()).await?;
     writer.write_all(b"\n").await?;
-    println!("File {} sent.", filename);
+    println!("File {} sent to {}.", filename, destination);
     Ok(())
 }
 
