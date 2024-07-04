@@ -171,8 +171,8 @@ async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result
                             }).trim().to_ascii_lowercase().to_string();
                     // search for user
                     let (username, userpwd) = find_user_login(name.clone());
-                    println!("{}->{}",name.clone(),username);
-                    println!("TEST");
+                    // println!("{}->{}",name.clone(),username);
+                    // println!("TEST");
 
                     if username.eq(""){
                         broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Incorrect username".to_string()) }).await?;
@@ -342,7 +342,7 @@ async fn broker_loop(events: Receiver<Event>) -> Result<()>{
             Event::Message { from, to, msg } => {
                 for addr in to {
                     if let Some(peer) = peers.get_mut(&addr) {
-                        let msg = format!("from {}: {}\n\r", from, msg);
+                        let msg = format!("{}: {}\n\r", from, msg);
                         match peer.send(msg).await{
                             Ok(_) => (),
                             Err(why) => print!("{}", why),
@@ -352,7 +352,7 @@ async fn broker_loop(events: Receiver<Event>) -> Result<()>{
             }
             Event::SysMessage {stream, msg } => {
                 let mut stream = &*stream;
-                let msg = format!("{}\n\r", msg);
+                let msg = format!("SYS:{}\n\r", msg);
                 // match stream.write_all(msg.as_bytes()).await{ //##ASK "?"" not applic?
                 //     Ok(_) => (),
                 //     Err(why) => println!("{}",why),
@@ -392,5 +392,5 @@ async fn broker_loop(events: Receiver<Event>) -> Result<()>{
 }
    
 fn main() -> Result<()>{
-    task::block_on(accept_loop("127.0.0.1:8080"))
+    task::block_on(accept_loop("127.0.0.1:8080"))//49983=>5
 }
