@@ -3,6 +3,8 @@ extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
 
+use std::{thread, time::{self, Duration}};
+
 use async_std::{
     fs::File,
     io::{stdin, BufReader},
@@ -22,6 +24,12 @@ struct FileTransfer {
 
 // main
 fn main() -> Result<()> {
+    // for i in 1..10000{
+    //     task::spawn(try_run("127.0.0.1:8080"));
+    //     thread::sleep(time::Duration::from_millis(30));
+    //     println!("{}",i);
+    // }
+    
     task::block_on(try_run("127.0.0.1:8080"))
 }
 
