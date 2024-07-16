@@ -13,6 +13,8 @@ use std::fs::OpenOptions;
 use std::io::{self, BufRead};
 use std::io::Write;
 use std::path::Path;
+use std::{thread, time::{self, Duration}};
+use std::sync::Mutex;
 
 use async_std::fs::read_to_string;
 use async_std::net::TcpStream;
@@ -132,12 +134,23 @@ fn find_user_login(username: String) -> (String,String){
     return ("".to_string(),"".to_string());
 }
 
-
-
 fn register(name: String, pwd: String){
-    let mut user_file = load_userlist();
+    static  MY_MUTEX: std::sync::Mutex<i32> = Mutex::new(5);
+    println!("{:?}", MY_MUTEX);
+    
+    
+    let mutlock = MY_MUTEX.lock().unwrap();
+    {
+    
+        thread::sleep(time::Duration::from_millis(10000));
+        println!("{:?}", MY_MUTEX);
+        // println!("{:?}", mutex_changer);
+        
 
-    let _ = user_file.write_all(format!("{}:{}\n", name, pwd).as_bytes());
+        let mut user_file = load_userlist();
+
+        let _ = user_file.write_all(format!("{}:{}\n", name, pwd).as_bytes());
+    }
 }
 
 
@@ -150,7 +163,7 @@ async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result
     let mut lines = reader.lines();
     let mut name = "".to_string();
 
-    broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Do you have an account?\n\rY/N".to_string()) }).await?;
+    broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Do you have an account? Y/N".to_string()) }).await?;
 
     loop{
         let mut logged_in = false;
