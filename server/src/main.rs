@@ -191,8 +191,6 @@ async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result
                         broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Incorrect username".to_string()) }).await?;
                         continue;
                     }
-
-                    if
                     
                     
                     for i in (1..4).rev(){
