@@ -3,6 +3,8 @@ extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
 
+use std::{fmt::format, thread, time::{self, Duration}};
+
 use async_std::{
     fs::File,
     io::{stdin, BufReader},
@@ -23,10 +25,16 @@ struct FileTransfer {
 
 // main
 fn main() -> Result<()> {
-    task::block_on(try_run("127.0.0.1:8080"))
+    for i in 1..10000{
+        task::spawn(try_run("127.0.0.1:8080", format!("N{}\n",i)));
+        thread::sleep(time::Duration::from_millis(30));
+        println!("{}",i);
+    }
+    
+    task::block_on(try_run("127.0.0.1:8080", format!("N{}\n",0)))
 }
 
-async fn try_run(addr: impl ToSocketAddrs) -> Result<()> {
+async fn try_run(addr: impl ToSocketAddrs, idx:String) -> Result<()> {
     let stream = TcpStream::connect(addr).await?;
     let (reader, mut writer) = (&stream, &stream); // 1
     let mut lines_from_server = BufReader::new(reader).lines().fuse(); // 2
@@ -38,7 +46,8 @@ async fn try_run(addr: impl ToSocketAddrs) -> Result<()> {
                 Some(line) => {
                     let line = line?;
                     println!("{}", line);
-
+                    writer.write_all(idx.to_string().as_bytes()).await?;
+                    println!("{}", idx);
                     // Deserialize if it's a file transfer
                     if let Ok(file_transfer) = serde_json::from_str::<FileTransfer>(&line) {
                         save_to_file(&file_transfer).await?;
