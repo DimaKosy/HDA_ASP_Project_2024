@@ -36,7 +36,7 @@ fn main() -> Result<()> {
 
 async fn try_run(addr: impl ToSocketAddrs) -> Result<()> {
     let stream = TcpStream::connect(addr).await?;
-    let (reader, writer) = (&stream, &stream);
+    let (reader, mut writer) = (&stream, &stream);
     let mut lines_from_server = BufReader::new(reader).lines().fuse();
     let mut lines_from_stdin = BufReader::new(stdin()).lines().fuse();
 
@@ -48,7 +48,7 @@ async fn try_run(addr: impl ToSocketAddrs) -> Result<()> {
                     //println!("Received: {}", line);
                     // Check for SYS: prefix
                     if line.starts_with("SYS:") {
-                        let system_msg = line[4..].trim().to_string();
+                        let system_msg = line[4..].to_string();
                         println!("System message: {}", system_msg);
                     } else {
                         match serde_json::from_str::<Message>(&line) {
@@ -63,8 +63,7 @@ async fn try_run(addr: impl ToSocketAddrs) -> Result<()> {
                                 println!("System message: {}", info);
                             }
                             Err(e) => {
-                                println!("Received unknown message: {}", line);
-                                println!("Error: {}", e);
+                                println!("Received unknown: {}", line);
                             }
                         }
                     }
@@ -74,27 +73,10 @@ async fn try_run(addr: impl ToSocketAddrs) -> Result<()> {
             line = lines_from_stdin.next().fuse() => match line {
                 Some(line) => {
                     let line = line?;
-                    let (dest, msg_type) = match line.find(":") {
-                        None => continue,
-                        Some(idx) => (&line[..idx], line[idx + 1 ..].trim()),
-                    };
-                    match msg_type {
-                        msg if msg.starts_with("file:") => {
-                            let filename = msg.trim_start_matches("file:").trim();
-                            send_file(dest, filename, &mut writer.clone()).await?;
-                        }
-                        msg if msg.starts_with("text:") => {
-                            let content = msg.trim_start_matches("text:").trim();
-                            send_text(dest, content, &mut writer.clone()).await?;
-                        }
-                        msg if msg.starts_with("system:") => {
-                            let info = msg.trim_start_matches("system:").trim();
-                            send_system_message(dest, info, &mut writer.clone()).await?;
-                        }
-                        _ => {
-                            println!("Invalid message format: {}", line);
-                        }
-                    }
+                    println!("Sending input: {}", line);
+                    writer.write_all(line.as_bytes()).await?;
+                    writer.write_all(b"\n").await?;
+                    writer.flush().await?;
                 }
                 None => break,
             }
