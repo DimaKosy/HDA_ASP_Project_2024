@@ -53,6 +53,9 @@ enum Event { // 1
     SysMessage {
         stream: Arc<TcpStream>,
         msg: String
+    },
+    CheckLoginStatus{
+        name:String
     }
 }
 
@@ -172,7 +175,7 @@ async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result
             Some(line) => line?,
         }).trim().to_ascii_lowercase().to_string();
         
-
+        print!("DEBUG: PWD RECEIVED {}", choice);
         match choice.chars().next() {
             Some('y') => {
                 loop {
@@ -182,6 +185,7 @@ async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result
                                 None => Err("peer disconnected immediately")?,
                                 Some(line) => line?,
                             }).trim().to_ascii_lowercase().to_string();
+                    print!("DEBUG: NAME RECEIVED {}", name);
                     // search for user
                     let (username, userpwd) = find_user_login(name.clone());
                     // println!("{}->{}",name.clone(),username);
@@ -192,22 +196,31 @@ async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result
                         continue;
                     }
 
-                    if
                     
                     
                     for i in (1..4).rev(){
-                        broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Please enter your password\n\rAttempts remaining ".to_string()+&i.to_string()) }).await?;
-
+                        broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Please enter your password".to_string())}).await?;
+                        broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Attempts remaining ".to_string()+&i.to_string()) }).await?;
                         let pwd = (match lines.next().await { 
                             None => Err("peer disconnected immediately")?,
                             Some(line) => line?,
                         }).trim().to_string();
-                        
+                        print!("DEBUG: PWD RECEIVED {}", pwd);
+
                         // println!("PASSWORD {}->{}",pwd.len(),userpwd.len());
                         if !userpwd.eq(&pwd.clone()){
                             broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Incorrect password".to_string()) }).await?;
                             continue;
                         }
+
+                        //CHECK IF LOGGED IN?
+                        // else if true {
+                        //     logged_in = true;
+                        //     println!("T1 {:?}",broker.send(Event::CheckLoginStatus { name: name.clone() }).await);
+                        //     println!("TEST");
+                        //     break;
+                        // }
+
                         else{
                             println!("LOGGED IN");
                             logged_in = true;
@@ -228,7 +241,7 @@ async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result
                         None => Err("peer disconnected immediately")?,
                         Some(line) => line?,
                     }).trim().to_ascii_lowercase().to_string();
-
+                    print!("DEBUG: NAME RECEIVED {}", name);
                     // search for user
                     let (username, _) = find_user_login(name.clone());
 
@@ -240,7 +253,7 @@ async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result
                     if name.chars().all(char::is_alphanumeric) {
                         break;
                     }
-                    broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Username must only contain alpha-numeric characters\n\r".to_string()) })
+                    broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Username must only contain alpha-numeric characters".to_string()) })
                     .await?;
                 }
                 
@@ -250,7 +263,7 @@ async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result
                     None => Err("peer disconnected immediately")?,
                     Some(line) => line?,
                 }).trim().to_string();
-
+                print!("DEBUG: pwd RECEIVED {}", pwd);
                 register(name.clone(), pwd.to_string());
                 break;
             },
@@ -280,13 +293,14 @@ async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result
     
     broker.send(
         Event::SysMessage { 
-            stream: (Arc::clone(&stream)), msg: (format!("Welcome {}\n\r",name))
+            stream: (Arc::clone(&stream)), msg: (format!("Welcome {}",name))
         })
     .await?;
 
     while let Some(line) = lines.next().await {
-        
+    
         let line = line?;
+        print!("{}", line);
         let (dest, msg) = match line.find(':') { //splits message between destionation and message
             None => continue,
             Some(idx) => (&line[..idx], line[idx + 1 ..].trim()),
@@ -354,10 +368,20 @@ async fn broker_loop(events: Receiver<Event>) -> Result<()>{
 
         match event {
             //sending message to each?? destination
+            Event::CheckLoginStatus{name} =>{
+                if let Some(peer) = peers.get_mut(&name){
+                    print!("T0 pass");
+                    
+                }
+                else{
+                    print!("T0 fail");
+                }
+                return Ok(())
+            }
             Event::Message { from, to, msg } => {
                 for addr in to {
                     if let Some(peer) = peers.get_mut(&addr) {
-                        let msg = format!("{}: {}\n\r", from, msg);
+                        let msg = format!("{}: {}", from, msg);
                         match peer.send(msg).await{
                             Ok(_) => (),
                             Err(why) => print!("{}", why),
@@ -367,7 +391,7 @@ async fn broker_loop(events: Receiver<Event>) -> Result<()>{
             }
             Event::SysMessage {stream, msg } => {
                 let mut stream = &*stream;
-                let msg = format!("SYS:{}\n\r", msg);
+                let msg = format!("SYS:{}", msg);
                 // match stream.write_all(msg.as_bytes()).await{ //##ASK "?"" not applic?
                 //     Ok(_) => (),
                 //     Err(why) => println!("{}",why),
@@ -402,8 +426,6 @@ async fn broker_loop(events: Receiver<Event>) -> Result<()>{
     while let Some((_name, _pending_messages)) = disconnect_receiver.next().await {
     }
     Ok(())
-    
-
 }
    
 fn main() -> Result<()>{
