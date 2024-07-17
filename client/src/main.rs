@@ -3,8 +3,6 @@ extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
 
-// use std::{thread, time::{self, Duration}};
-
 use async_std::{
     fs::File,
     io::{stdin, BufReader},
@@ -24,78 +22,61 @@ struct FileTransfer {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "type")]
 enum Message {
-    Text { content: String },
+    Text { destination: String, content: String },
     File { transfer: FileTransfer },
     System { info: String },
 }
 
 // main
 fn main() -> Result<()> {
-    // for i in 1..10000{
-    //     task::spawn(try_run("127.0.0.1:8080", format!("N{}\n",i)));
-    //     thread::sleep(time::Duration::from_millis(30));
-    //     println!("{}",i);
-    // }
-    
-    task::block_on(try_run("127.0.0.1:8080", format!("N{}\n",0)))
+    task::block_on(try_run("127.0.0.1:8080"))
 }
 
-async fn try_run(addr: impl ToSocketAddrs, idx:String) -> Result<()> {
+async fn try_run(addr: impl ToSocketAddrs) -> Result<()> {
     let stream = TcpStream::connect(addr).await?;
-    let (reader, mut writer) = (&stream, &stream); // 1
-    let mut lines_from_server = BufReader::new(reader).lines().fuse(); // 2
-    let mut lines_from_stdin = BufReader::new(stdin()).lines().fuse(); // 2
-    
+    let (reader, mut writer) = (&stream, &stream);
+    let mut lines_from_server = BufReader::new(reader).lines().fuse();
+    let mut lines_from_stdin = BufReader::new(stdin()).lines().fuse();
+
     loop {
-        select! { // 3
+        select! {
             line = lines_from_server.next().fuse() => match line {
                 Some(line) => {
                     let line = line?;
-                    match serde_json::from_str::<Message>(&line) {
-                        Ok(Message::Text { content }) => {
-                            println!("Text message: {}", content);
-                        }
-                        Ok(Message::File { transfer }) => {
-                            save_to_file(&transfer).await?;
-                            println!("File {} saved.", transfer.filename);
-                        }
-                        Ok(Message::System { info }) => {
-                            println!("System message: {}", info);
-                        }
-                        Err(_) => {
-                            println!("Received unknown message: {}", line);
+                    //println!("Received: {}", line);
+                    // Check for SYS: prefix
+                    if line.starts_with("SYS:") {
+                        let system_msg = line[4..].to_string();
+                        println!("System message: {}", system_msg);
+                    } else {
+                        match serde_json::from_str::<Message>(&line) {
+                            Ok(Message::Text { destination, content }) => {
+                                println!("Message to {}: {}", destination, content);
+                            }
+                            Ok(Message::File { transfer }) => {
+                                save_to_file(&transfer).await?;
+                                println!("File {} saved.", transfer.filename);
+                            }
+                            Ok(Message::System { info }) => {
+                                println!("System message: {}", info);
+                            }
+                            Err(e) => {
+                                println!("Received unknown: {}", line);
+                            }
                         }
                     }
-                    writer.write_all(idx.to_string().as_bytes()).await?;
-                    println!("{}", idx);
                 },
                 None => break,
             },
             line = lines_from_stdin.next().fuse() => match line {
                 Some(line) => {
                     let line = line?;
-                    let (dest, msg_type) = match line.find(":"){
-                        None => continue,
-                        Some(idx) => (&line[..idx], line[idx + 1 ..].trim()),
-                    };
-                    match msg_type {
-                        msg if msg.starts_with("file:") => {
-                            let filename = msg.trim_start_matches("file:").trim();
-                            send_file(dest, &filename, &mut writer.clone()).await?;
-                        }
-                        msg if msg.starts_with("text:") => {
-                            let text = msg.trim_start_matches("text:").trim();
-                            send_text(dest, text, &mut writer.clone()).await?;
-                        }
-                        msg if msg.starts_with("system:") => {
-                            let info = msg.trim_start_matches("system:").trim();
-                            send_system_message(dest, info, &mut writer.clone()).await?;
-                        }
-                        _ => {
-                            println!("Invalid message format: {}", line);
-                        }
-                    }
+                    println!("Sending input: {}", line);
+                    writer.write_all(line.as_bytes()).await?;
+                    writer.write_all(b"\n").await?;
+                    writer.flush().await?;
                 }
                 None => break,
             }
@@ -103,7 +84,6 @@ async fn try_run(addr: impl ToSocketAddrs, idx:String) -> Result<()> {
     }
     Ok(())
 }
-
 
 async fn send_file(destination: &str, filename: &str, writer: &mut TcpStream) -> Result<()> {
     let mut file = File::open(filename).await?;
@@ -116,37 +96,31 @@ async fn send_file(destination: &str, filename: &str, writer: &mut TcpStream) ->
         data: buffer,
     };
 
-    // let message = Message::File {
-    //     transfer: file_transfer,
-    // };
-
-    let serialized = serde_json::to_string(&file_transfer)?;
+    let message = Message::File { transfer: file_transfer };
+    let serialized = serde_json::to_string(&message)?;
     writer.write_all(serialized.as_bytes()).await?;
     writer.write_all(b"\n").await?;
+    writer.flush().await?;
     println!("File {} sent to {}.", filename, destination);
     Ok(())
 }
 
-async fn send_text(destination: &str, text: &str, writer: &mut TcpStream) -> Result<()> {
-    let message = Message::Text {
-        content: text.to_string(),
-    };
-
+async fn send_text(destination: &str, content: &str, writer: &mut TcpStream) -> Result<()> {
+    let message = Message::Text { destination: destination.to_string(), content: content.to_string() };
     let serialized = serde_json::to_string(&message)?;
     writer.write_all(serialized.as_bytes()).await?;
     writer.write_all(b"\n").await?;
-    println!("Text message sent to {}.", destination);
+    writer.flush().await?;
+    println!("Text sent to {}: {}", destination, content);
     Ok(())
 }
 
 async fn send_system_message(destination: &str, info: &str, writer: &mut TcpStream) -> Result<()> {
-    let message = Message::System {
-        info: info.to_string(),
-    };
-
+    let message = Message::System { info: info.to_string() };
     let serialized = serde_json::to_string(&message)?;
     writer.write_all(serialized.as_bytes()).await?;
     writer.write_all(b"\n").await?;
+    writer.flush().await?;
     println!("System message sent to {}: {}", destination, info);
     Ok(())
 }

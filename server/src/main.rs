@@ -372,6 +372,7 @@ async fn broker_loop(events: Receiver<Event>) -> Result<()>{
                 // }
 
                 stream.write_all(msg.as_bytes()).await?;
+                
             }
             //adding new peer
             Event::NewPeer { name, stream, shutdown } => {
