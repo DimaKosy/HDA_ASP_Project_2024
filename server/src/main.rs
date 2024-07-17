@@ -7,6 +7,16 @@
 // - Do you want/need some form of user management? If so, how would that look like?
 
 
+use std::fs::File;
+use std::io::prelude::*;
+use std::fs::OpenOptions;
+use std::io::{self, BufRead};
+use std::io::Write;
+use std::path::Path;
+use std::{thread, time::{self, Duration}};
+use std::sync::Mutex;
+
+use async_std::fs::read_to_string;
 use async_std::net::TcpStream;
 
 use futures::channel::mpsc;
@@ -46,10 +56,25 @@ enum Event { // 1
     }
 }
 
+fn load_userlist() -> File{
+    let user_file = OpenOptions::new()
+    .append(true)
+    .create(true)
+    .read(true)
+    .open("./userlist.txt")
+    .expect("Failed to open or create the file"); //Unrecoverable
+
+    user_file
+}
+
 enum Void {} //Enforcer to ensure messages are sent down an uninhabited  channel
 
 //Accept loop for incoming connections
 async fn accept_loop(addr: impl ToSocketAddrs) -> Result<()> {
+
+    //Opens user list
+    // let mut user_file = load_userlist();
+
 
     //binds listener to address
     let listener = TcpListener::bind(addr).await?;
@@ -65,7 +90,7 @@ async fn accept_loop(addr: impl ToSocketAddrs) -> Result<()> {
 
         //Connected
         println!("Accepting from  : {}", stream.peer_addr()?);
-        spawn_and_log_error(connection_loop(broker_sender.clone(), stream));
+        spawn_and_log_error(connection_loop(broker_sender.clone(), stream,));
     }
     drop(broker_sender);    //closes broker so that channel is empty
     match _broker_handle.await{  //Joins broker, ensuring complition ##ASK
@@ -88,30 +113,159 @@ where
     })
 }
 
+
+fn find_user_login(username: String) -> (String,String){
+    let mut user_file = load_userlist();
+    
+    let mut file_content = String::new();
+    user_file.read_to_string(&mut file_content).unwrap();
+
+    for line in file_content.lines(){
+        let (name, pwd) = match line.find(':') { //splits message between destionation and message
+            None => ("",""),
+            Some(idx) => (&line[..idx], line[idx + 1 ..].trim()),
+        };
+        // println!("{}:{}",name,pwd);
+        if name.eq(&username){
+            return (name.to_string(),pwd.to_string());
+        }
+    }
+
+    return ("".to_string(),"".to_string());
+}
+
+fn register(name: String, pwd: String){
+    static  MY_MUTEX: std::sync::Mutex<i32> = Mutex::new(5);
+    println!("{:?}", MY_MUTEX);
+    
+    
+    let mutlock = MY_MUTEX.lock().unwrap();
+    {
+    
+        thread::sleep(time::Duration::from_millis(10000));
+        println!("{:?}", MY_MUTEX);
+        // println!("{:?}", mutex_changer);
+        
+
+        let mut user_file = load_userlist();
+
+        let _ = user_file.write_all(format!("{}:{}\n", name, pwd).as_bytes());
+    }
+}
+
+
 async fn connection_loop(mut broker: Sender<Event>, stream: TcpStream) -> Result<()> {
 
     let stream = Arc::new(stream);
     let reader = BufReader::new(&*stream);
+
     
-
-    broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Please enter a username:\n\r".to_string()) })
-    .await?;
-    println!("Sent Welcome?");
-
     let mut lines = reader.lines();
-    let mut name;
+    let mut name = "".to_string();
+
+    broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Do you have an account? Y/N".to_string()) }).await?;
+
     loop{
-        name = (match lines.next().await { 
+        let mut logged_in = false;
+        let choice = (match lines.next().await {
             None => Err("peer disconnected immediately")?,
             Some(line) => line?,
         }).trim().to_ascii_lowercase().to_string();
+        
 
-        if (name.chars().all(char::is_alphanumeric)) {
+        match choice.chars().next() {
+            Some('y') => {
+                loop {
+                    let mut logged_in = false;
+                    broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Please enter your username".to_string()) }).await?;
+                    name = (match lines.next().await { 
+                                None => Err("peer disconnected immediately")?,
+                                Some(line) => line?,
+                            }).trim().to_ascii_lowercase().to_string();
+                    // search for user
+                    let (username, userpwd) = find_user_login(name.clone());
+                    // println!("{}->{}",name.clone(),username);
+                    // println!("TEST");
+
+                    if username.eq(""){
+                        broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Incorrect username".to_string()) }).await?;
+                        continue;
+                    }
+                    
+                    
+                    for i in (1..4).rev(){
+                        broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Please enter your password\n\rAttempts remaining ".to_string()+&i.to_string()) }).await?;
+
+                        let pwd = (match lines.next().await { 
+                            None => Err("peer disconnected immediately")?,
+                            Some(line) => line?,
+                        }).trim().to_string();
+                        
+                        // println!("PASSWORD {}->{}",pwd.len(),userpwd.len());
+                        if !userpwd.eq(&pwd.clone()){
+                            broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Incorrect password".to_string()) }).await?;
+                            continue;
+                        }
+                        else{
+                            println!("LOGGED IN");
+                            logged_in = true;
+                            break;
+                        }
+                    }
+
+                    if logged_in{
+                        break;
+                    }
+                }
+            },
+            Some('n') => {
+                broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Please enter your username".to_string()) }).await?;                
+                
+                loop{
+                    name = (match lines.next().await { 
+                        None => Err("peer disconnected immediately")?,
+                        Some(line) => line?,
+                    }).trim().to_ascii_lowercase().to_string();
+
+                    // search for user
+                    let (username, _) = find_user_login(name.clone());
+
+                    if !username.eq(""){
+                        broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("username taken".to_string()) }).await?;
+                        continue;
+                    }
+
+                    if name.chars().all(char::is_alphanumeric) {
+                        break;
+                    }
+                    broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Username must only contain alpha-numeric characters\n\r".to_string()) })
+                    .await?;
+                }
+                
+                broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Please enter your password".to_string()) }).await?;
+
+                let pwd = (match lines.next().await { 
+                    None => Err("peer disconnected immediately")?,
+                    Some(line) => line?,
+                }).trim().to_string();
+
+                register(name.clone(), pwd.to_string());
+                break;
+            },
+            _ => {
+                broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Please select Y or N".to_string()) }).await?;
+            },            
+        }
+
+        if !name.eq(""){
             break;
         }
-        broker.send(Event::SysMessage { stream: (Arc::clone(&stream)), msg: ("Username must only contain alpha-numeric characters\n\r".to_string()) })
-        .await?;
     }
+    
+
+    
+    // let mut name;
+    
     
     
     let (_shutdown_sender, shutdown_receiver) = mpsc::unbounded::<Void>(); //only purpose is to get dropped
@@ -201,7 +355,7 @@ async fn broker_loop(events: Receiver<Event>) -> Result<()>{
             Event::Message { from, to, msg } => {
                 for addr in to {
                     if let Some(peer) = peers.get_mut(&addr) {
-                        let msg = format!("from {}: {}\n\r", from, msg);
+                        let msg = format!("{}: {}\n\r", from, msg);
                         match peer.send(msg).await{
                             Ok(_) => (),
                             Err(why) => print!("{}", why),
@@ -211,7 +365,7 @@ async fn broker_loop(events: Receiver<Event>) -> Result<()>{
             }
             Event::SysMessage {stream, msg } => {
                 let mut stream = &*stream;
-                let msg = format!("{}\n\r", msg);
+                let msg = format!("SYS:{}\n\r", msg);
                 // match stream.write_all(msg.as_bytes()).await{ //##ASK "?"" not applic?
                 //     Ok(_) => (),
                 //     Err(why) => println!("{}",why),
@@ -251,5 +405,5 @@ async fn broker_loop(events: Receiver<Event>) -> Result<()>{
 }
    
 fn main() -> Result<()>{
-    task::block_on(accept_loop("127.0.0.1:8080"))
+    task::block_on(accept_loop("127.0.0.1:8080"))//49983=>5
 }
