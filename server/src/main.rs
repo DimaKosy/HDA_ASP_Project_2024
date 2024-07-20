@@ -142,7 +142,7 @@ fn register(name: String, pwd: String){
     let mutlock = MY_MUTEX.lock().unwrap();
     {
     
-        thread::sleep(time::Duration::from_millis(10000));
+        thread::sleep(time::Duration::from_millis(10));
         println!("{:?}", MY_MUTEX);
         // println!("{:?}", mutex_changer);
         
@@ -356,6 +356,7 @@ async fn broker_loop(events: Receiver<Event>) -> Result<()>{
                 for addr in to {
                     if let Some(peer) = peers.get_mut(&addr) {
                         let msg = format!("{}: {}\n\r", from, msg);
+                        println!("{}",msg);
                         match peer.send(msg).await{
                             Ok(_) => (),
                             Err(why) => print!("{}", why),

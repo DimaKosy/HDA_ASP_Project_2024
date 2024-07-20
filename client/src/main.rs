@@ -76,7 +76,9 @@ async fn try_run(addr: impl ToSocketAddrs) -> Result<()> {
                         println!("IT DON' WORK :)")
                     }
                     if msg_type.eq("text"){
-                        println!("i sent a text")}
+
+                        println!("From {}: {}",dest, msg);
+                    }
                     else{
                         println!("NOT FILE");
 
